@@ -64,13 +64,3 @@ url = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/a
 # print("Databases:", client.list_database_names())
 # Subscriptions = client["ats_integration"]["Subscription"].find({})
 # print("Subscriptions:")
-
-
-
-from pymongo import MongoClient
-
-uri = "mongodb://deinats123:deinats123@deindev.infosiphon.com:7035/"
-client = MongoClient(uri)
-db = client['ats_integration']
-# client.admin.command("ping")
-print("Databases:", list(db["Subscriptions"].find({})))
