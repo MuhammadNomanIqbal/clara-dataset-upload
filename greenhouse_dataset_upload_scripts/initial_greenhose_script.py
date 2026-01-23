@@ -1,9 +1,10 @@
 import requests
 import time
+import os
 import base64
 from urllib.parse import urlparse, parse_qs
 from utils import fetch_details_from_csv, update_csv_with_greenhouse_job_id
-
+GREENHOUSE_API_KEY = (os.getenv("GREENHOUSE_API_KEY") or "").strip()
 
 class GreenhouseClient:
     def __init__(self, api_key):
@@ -85,7 +86,7 @@ job_details = fetch_details_from_csv(input_csv="/home/asim/Desktop/clara-dataset
 print(f"Fetched Job Title: {job_details['job_title']}")
 print(f"Fetched Job Description: {job_details['job_description']}")
 
-client = GreenhouseClient(api_key="dc3146c7e00eeea44a3d4ea5be3fbc76-7")
+client = GreenhouseClient(api_key=GREENHOUSE_API_KEY)
 print(f"Initialized Greenhouse Client successfully {client}")
 # job = client.create_job(
 #     template_job_id="4560475007",
