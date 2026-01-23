@@ -1,5 +1,8 @@
 import requests
 import json
+
+from bson import ObjectId
+
 # Test job application URL
 
 # url = "https://deinqa.infosiphon.com/apply-job?job_obj_id=69674859ded556ac902a8424"
@@ -22,35 +25,52 @@ url = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/a
 # print("Response Text:", response.json())
 
 
-import requests
+# import requests
+#
+# url = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job/upload-candidate-resume/"
+#
+# data = {
+#     "first_name": "Noman",
+#     "last_name": "iqbal",
+#     "email": "fake-for-warden-pcf_100226@fake-domain.com",
+# }
+#
+# # IMPORTANT: file must go into `files`, not `data`
+# files = {
+#     "file": ("app_pcf_1393_100226_0.pdf",
+#              open("/home/asim/Downloads/job_wise_resumes/job_1393/app_pcf_1393_100226_0.pdf", "rb"),
+#              "application/pdf")
+# }
+#
+# headers = {
+#     "Accept": "application/json",
+#     # "Authorization": "Bearer YOUR_TOKEN",   # if needed
+# }
+#
+# resp = requests.post(url, data=data, files=files, headers=headers)
+#
+# print("Status Code:", resp.status_code)
+# print("Response Text:", resp.text)
+#
+# # If server returns JSON
+# try:
+#     print("JSON:", resp.json())
+# except Exception:
+#     pass
+# from pymongo import MongoClient
+# uri="mongodb://$de:$de@mongodb:27017/ats"
+#
+# client = MongoClient(uri)
+# print("Databases:", client.list_database_names())
+# Subscriptions = client["ats_integration"]["Subscription"].find({})
+# print("Subscriptions:")
 
-url = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job/upload-candidate-resume/"
 
-data = {
-    "first_name": "Noman",
-    "last_name": "iqbal",
-    "email": "fake-for-warden-pcf_100226@fake-domain.com",
-}
 
-# IMPORTANT: file must go into `files`, not `data`
-files = {
-    "file": ("app_pcf_1393_100226_0.pdf",
-             open("/home/asim/Downloads/job_wise_resumes/job_1393/app_pcf_1393_100226_0.pdf", "rb"),
-             "application/pdf")
-}
+from pymongo import MongoClient
 
-headers = {
-    "Accept": "application/json",
-    # "Authorization": "Bearer YOUR_TOKEN",   # if needed
-}
-
-resp = requests.post(url, data=data, files=files, headers=headers)
-
-print("Status Code:", resp.status_code)
-print("Response Text:", resp.text)
-
-# If server returns JSON
-try:
-    print("JSON:", resp.json())
-except Exception:
-    pass
+uri = "mongodb://deinats123:deinats123@deindev.infosiphon.com:7035/"
+client = MongoClient(uri)
+db = client['ats_integration']
+# client.admin.command("ping")
+print("Databases:", list(db["Subscriptions"].find({})))

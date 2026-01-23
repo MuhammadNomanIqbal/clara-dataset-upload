@@ -67,9 +67,7 @@ FAIL_HEADERS = [
     "external_id",
     "email",
     "status_code",
-    "message",
-    "candidate_obj_id",
-    "application_obj_id",
+    "message"
 ]
 
 
