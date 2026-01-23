@@ -3,20 +3,16 @@ import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
-
 import requests
 import pdfplumber
 
 # ============== CONFIG ==============
 BASE_DIR = Path("/home/asim/Downloads/job_wise_resumes")
 
-# Map: folder name -> job_obj_id
-JOB_ID_MAP = {
-    "job_1393": "6970c43309b0d28599ec8071",
-    # "job_1394": "....",
-}
+# ✅ Use your uploaded/mounted CSV (change if needed)
+JOB_MAP_CSV_PATH = Path("/home/asim/Desktop/clara-dataset-upload/clara_dataset/resume_dataset/Clara - Candidate Matching - 2026-01-20 - Applications (1).csv")
 
-API_BASE = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job"
+API_BASE = "https://deindev.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job"
 VALIDATE_EMAIL_URL = f"{API_BASE}/validate-email/"
 UPLOAD_URL_TEMPLATE = f"{API_BASE}/upload-candidate-resume/{{job_obj_id}}"
 
@@ -29,10 +25,8 @@ UPLOAD_FILE_FIELD = "file"
 SKIP_ON_VALIDATE_FAIL = True
 
 OUT_DIR = Path("/home/asim/Desktop/clara-dataset-upload/logs")
-SUCCESS_CSV_PATH = OUT_DIR / "success.csv"
-FAILURES_CSV_PATH = OUT_DIR / "failures.csv"
-
-# NEW: progress log file (for monitoring with tail -f)
+SUCCESS_CSV_PATH = OUT_DIR / "profile_upload_success.csv"
+FAILURES_CSV_PATH = OUT_DIR / "profile_upload_failures.csv"
 PROGRESS_LOG_PATH = OUT_DIR / "progress.log"
 
 REQUEST_TIMEOUT_VALIDATE = 60
@@ -51,14 +45,14 @@ BAD_KEYWORDS = {
 }
 
 # ---------------- CSV schema ----------------
+
 SUCCESS_HEADERS = [
     "timestamp",
     "job_obj_id",
     "job_id",
     "profile_id",
-    "profile_name",
+    "external_id",
     "email",
-    "stage",
     "status_code",
     "message",
     "candidate_obj_id",
@@ -70,9 +64,8 @@ FAIL_HEADERS = [
     "job_obj_id",
     "job_id",
     "profile_id",
-    "profile_name",
+    "external_id",
     "email",
-    "stage",
     "status_code",
     "message",
     "candidate_obj_id",
@@ -86,11 +79,6 @@ def ensure_progress_log_dir():
 
 
 def log_progress(line: str):
-    """
-    Writes one line to progress.log (and also prints it).
-    You can monitor with:
-      tail -f /home/asim/Desktop/clara-dataset-upload/logs/progress.log
-    """
     ensure_progress_log_dir()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = f"{ts} | {line}"
@@ -120,6 +108,67 @@ def write_fail_row(**kwargs):
         w.writerow([kwargs.get(h, "") for h in FAIL_HEADERS])
 
 
+# ---------------- Job map CSV ----------------
+def _norm_key(k: str) -> str:
+    # normalize header names like "job|_obj_id" -> "job_obj_id"
+    k = (k or "").strip().lower()
+    k = re.sub(r"[^a-z0-9]+", "_", k)
+    k = re.sub(r"_+", "_", k).strip("_")
+    return k
+
+
+def normalize_job_id(job_id: str) -> str:
+    """
+    Normalizes job_id into numeric string only.
+    Accepts: '258', 'job_258', 'job-258', ' Job_258 '
+    Returns: '258'
+    """
+    s = (job_id or "").strip()
+    m = re.search(r"(\d+)", s)
+    return m.group(1) if m else ""
+
+
+def normalize_job_folder(job_id: str) -> str:
+    """
+    ✅ Fix for your issue:
+    Ensures folder name is exactly 'job_<number>' even if CSV contains 'job_258'.
+    """
+    num = normalize_job_id(job_id)
+    return f"job_{num}" if num else ""
+
+
+def load_job_map(csv_path: Path) -> list[dict]:
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Job map CSV not found: {csv_path}")
+
+    rows = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            return rows
+
+        for raw in reader:
+            # normalize keys
+            row = {_norm_key(k): (v or "").strip() for k, v in raw.items()}
+
+            raw_job_id = row.get("job_id") or row.get("job") or ""
+            job_id = normalize_job_id(raw_job_id)
+
+            job_obj_id = (
+                row.get("job_obj_id")
+                or row.get("job_objid")
+                or row.get("job_obj")
+                or row.get("job_obj_id".replace("_", ""))  # edge case
+            )
+
+            if not job_id or not job_obj_id:
+                continue
+
+            rows.append({"job_id": job_id, "job_obj_id": job_obj_id})
+
+    return rows
+
+
 # ---------------- Utility ----------------
 def parse_filename(pdf_name: str) -> Optional[dict]:
     m = FILENAME_RE.match(pdf_name)
@@ -129,18 +178,13 @@ def parse_filename(pdf_name: str) -> Optional[dict]:
     job_id = m.group("job")
     resume = m.group("resume")
     return {
-        "full_stem": m.group("full"),
+        "full_stem": m.group("full"),  # e.g. app_pcf_249_55317_0
         "prefix": prefix,
         "job_id": job_id,
         "resume": resume,
         "idx": m.group("idx"),
         "profile_id": f"{prefix}_{resume}",
     }
-
-
-def extract_profile_id_from_filename(pdf_name: str) -> Optional[str]:
-    info = parse_filename(pdf_name)
-    return info["profile_id"] if info else None
 
 
 def build_fake_email(full_resume_stem: str) -> str:
@@ -266,12 +310,26 @@ def main():
 
     grand_total = grand_ok = grand_fail = grand_skip = 0
 
-    log_progress(f"RUN START | BASE_DIR={BASE_DIR} | API_BASE={API_BASE}")
+    job_rows = load_job_map(JOB_MAP_CSV_PATH)
 
-    for external_id, job_obj_id in JOB_ID_MAP.items():
-        folder_path = BASE_DIR / external_id
+    if not job_rows:
+        log_progress(f"RUN START | BASE_DIR={BASE_DIR} | API_BASE={API_BASE} | job_map_rows=0 | ERROR: No valid rows loaded from {JOB_MAP_CSV_PATH}")
+        log_progress("Tip: Ensure your CSV has columns job_id and job_obj_id (or job|_obj_id).")
+        log_progress("RUN END")
+        return
+
+    log_progress(f"RUN START | BASE_DIR={BASE_DIR} | API_BASE={API_BASE} | job_map_rows={len(job_rows)}")
+
+    for row in job_rows:
+        job_id = row["job_id"]         # numeric string now
+        job_obj_id = row["job_obj_id"]
+
+        # ✅ FIX: folder name always becomes job_<number>
+        external_folder = normalize_job_folder(job_id)
+        folder_path = BASE_DIR / external_folder
+
         if not folder_path.exists():
-            log_progress(f"[FOLDER MISSING] {external_id} | job_obj_id={job_obj_id} | path={folder_path}")
+            log_progress(f"[FOLDER MISSING] job_id=job_{job_id} | job_obj_id={job_obj_id} | path={folder_path}")
             continue
 
         pdfs = sorted(folder_path.glob("*.pdf"))
@@ -283,7 +341,7 @@ def main():
         job_validate_fail = 0
         job_parse_fail = 0
 
-        log_progress(f"=== START JOB {external_id} -> job_obj_id={job_obj_id} | files={len(pdfs)} ===")
+        log_progress(f"=== START JOB {external_folder} | job_id={job_id} -> job_obj_id={job_obj_id} | files={len(pdfs)} ===")
 
         for pdf_path in pdfs:
             grand_total += 1
@@ -297,27 +355,24 @@ def main():
                 write_fail_row(
                     timestamp=datetime.now().isoformat(timespec="seconds"),
                     job_obj_id=job_obj_id,
-                    job_id="",
+                    job_id=job_id,
                     profile_id="",
-                    profile_name="",
+                    external_id="",
                     email="",
-                    stage="parse",
                     status_code="",
-                    message="Bad filename format",
+                    message="parse: Bad filename format",
                     candidate_obj_id="",
                     application_obj_id="",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} PARSE_FAIL | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
+                log_progress(f"[{external_folder}] #{job_total} PARSE_FAIL | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
                 continue
 
-            job_id = info["job_id"]
             profile_id = info["profile_id"]
-            full_stem = info["full_stem"]
-            email = build_fake_email(full_stem)
+            external_id = info["full_stem"]  # ✅ app_pcf_249_55317_0
+            email = build_fake_email(external_id)
 
             first_name, last_name = extract_first_last_name(pdf_path)
-            profile_name = f"{first_name} {last_name}".strip()
 
             # VALIDATE
             try:
@@ -331,16 +386,15 @@ def main():
                     job_obj_id=job_obj_id,
                     job_id=job_id,
                     profile_id=profile_id,
-                    profile_name=profile_name,
+                    external_id=external_id,
                     email=email,
-                    stage="validate",
                     status_code="",
-                    message=f"Exception: {e}",
+                    message=f"validate: Exception: {e}",
                     candidate_obj_id="",
                     application_obj_id="",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} VALIDATE_EXCEPTION | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail}")
+                log_progress(f"[{external_folder}] #{job_total} VALIDATE_EXCEPTION | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail}")
                 continue
 
             v_msg, v_candidate, v_app = get_message_candidate_app(v_json)
@@ -354,16 +408,15 @@ def main():
                     job_obj_id=job_obj_id,
                     job_id=job_id,
                     profile_id=profile_id,
-                    profile_name=profile_name,
+                    external_id=external_id,
                     email=email,
-                    stage="validate",
                     status_code=str(v_status),
-                    message=v_msg or "validate_failed",
+                    message=f"validate: {v_msg or 'validate_failed'}",
                     candidate_obj_id=v_candidate or "",
                     application_obj_id=v_app or "",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} VALIDATE_FAIL({v_status}) | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
+                log_progress(f"[{external_folder}] #{job_total} VALIDATE_FAIL({v_status}) | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
                 if SKIP_ON_VALIDATE_FAIL:
                     continue
 
@@ -379,16 +432,15 @@ def main():
                     job_obj_id=job_obj_id,
                     job_id=job_id,
                     profile_id=profile_id,
-                    profile_name=profile_name,
+                    external_id=external_id,
                     email=email,
-                    stage="upload",
                     status_code="",
-                    message=f"Exception: {e}",
+                    message=f"upload: Exception: {e}",
                     candidate_obj_id="",
                     application_obj_id="",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} UPLOAD_EXCEPTION | ok={job_upload_ok} upload_fail={job_upload_fail}")
+                log_progress(f"[{external_folder}] #{job_total} UPLOAD_EXCEPTION | ok={job_upload_ok} upload_fail={job_upload_fail}")
                 continue
 
             u_msg, u_candidate, u_app = get_message_candidate_app(u_json)
@@ -402,16 +454,15 @@ def main():
                     job_obj_id=job_obj_id,
                     job_id=job_id,
                     profile_id=profile_id,
-                    profile_name=profile_name,
+                    external_id=external_id,
                     email=email,
-                    stage="upload",
                     status_code=str(u_status),
-                    message=u_msg or "upload_ok",
+                    message=f"upload: {u_msg or 'upload_ok'}",
                     candidate_obj_id=u_candidate or "",
                     application_obj_id=u_app or "",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} UPLOAD_OK | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
+                log_progress(f"[{external_folder}] #{job_total} UPLOAD_OK | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
 
             else:
                 grand_fail += 1
@@ -422,18 +473,17 @@ def main():
                     job_obj_id=job_obj_id,
                     job_id=job_id,
                     profile_id=profile_id,
-                    profile_name=profile_name,
+                    external_id=external_id,
                     email=email,
-                    stage="upload",
                     status_code=str(u_status),
-                    message=u_msg or "upload_failed",
+                    message=f"upload: {u_msg or 'upload_failed'}",
                     candidate_obj_id=u_candidate or "",
                     application_obj_id=u_app or "",
                 )
 
-                log_progress(f"[{external_id}] #{job_total} UPLOAD_FAIL({u_status}) | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
+                log_progress(f"[{external_folder}] #{job_total} UPLOAD_FAIL({u_status}) | ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail}")
 
-        log_progress(f"=== DONE JOB {external_id} | total={job_total} ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail} ===")
+        log_progress(f"=== DONE JOB {external_folder} | total={job_total} ok={job_upload_ok} upload_fail={job_upload_fail} validate_fail={job_validate_fail} parse_fail={job_parse_fail} ===")
 
     log_progress("====== GRAND SUMMARY ======")
     log_progress(f"Total processed: {grand_total}")
