@@ -12,7 +12,7 @@ import pdfplumber
 DEFAULT_BASE_DIR = Path("/home/asim/Desktop/clara-dataset-upload/clara_dataset/resume_dataset/job_wise_resumes")
 
 DEFAULT_JOB_MAP_CSV_PATH = Path(
-    "/home/asim/Desktop/clara-dataset-upload/clara_dataset/resume_dataset/Clara - Candidate Matching - 2026-01-20 - Applications (1).csv"
+    "/home/asim/Desktop/clara-dataset-upload/clara_dataset/resume_dataset/Clara - Candidate Matching - 2026-01-20 - Applications.csv"
 )
 
 API_BASE = "https://deindev.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job"
