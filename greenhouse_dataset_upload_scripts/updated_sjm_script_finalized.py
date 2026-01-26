@@ -15,7 +15,7 @@ DEFAULT_JOB_MAP_CSV_PATH = Path(
     "/home/asim/Desktop/clara-dataset-upload/clara_dataset/resume_dataset/Clara - Candidate Matching - 2026-01-20 - Applications.csv"
 )
 
-API_BASE = "https://deindev.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job"
+API_BASE = "https://deinqa.infosiphon.com/dein-api/deincore/partner/jobs/standalone/apply-job"
 VALIDATE_EMAIL_URL = f"{API_BASE}/validate-email/"
 UPLOAD_URL_TEMPLATE = f"{API_BASE}/upload-candidate-resume/{{job_obj_id}}"
 
